@@ -102,7 +102,7 @@ def lump_sum(df, monthly_contrib: float):
 
 
 
-def dca_sma(df, monthly_contrib: float, sma_period: int = 200):
+def dca_sma(df, monthly_contrib: float, sma_period: int = 90):
     """Simple Moving Average DCA
     Invest an amount (monthly_contrib) only when the price is above the X-day Simple Moving Average"""
 
