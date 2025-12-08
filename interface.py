@@ -17,7 +17,34 @@ from dca_simulator.metrics import compute_KeyMetrics
 
 ####Widgets####
 ##text box for ticker
+top15_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'BRK-B', 'META', 'UNH', 'JNJ', 'V', 'WMT', 'JPM', 'PG', 'MA']
 ticker = pn.widgets.TextInput(name="Ticker", value="AAPL", width=150)
+ticker.visible = False #we hide it until "Manual Input" mode is selected
+stock_selection_title = pn.pane.Markdown("### Select Stocks or Indices by:")
+
+stock_selection_mode = pn.widgets.RadioButtonGroup(options=["Ticker List", "Sector", "Manual Input"], button_type="primary")
+stock_selection_mode.value = None #no mode selected at the beginning
+
+ticker_list_selector = pn.widgets.MultiSelect(name="Select Tickers", options = top15_tickers, size=10)
+
+ticker_list_accordion = pn.Accordion(("Ticker Selection", ticker_list_selector))
+ticker_list_accordion[0].style={'font_size': "5px"}
+ticker_list_accordion.active = []
+ticker_list_accordion.visible=False #we hide it until "Ticker List" mode is selected
+
+def update_stock_selection(event):
+    """Update the visibility of ticker selection widgets depending on stock selection mode"""
+    mode = event.new
+
+    ticker_list_accordion.visible = False
+    ticker.visible = False
+
+    if mode == "Ticker List":
+        ticker_list_accordion.visible = True
+    elif mode == "Manual Input":
+        ticker.visible = True
+stock_selection_mode.param.watch(update_stock_selection, 'value')
+
 
 ##date picker
 start_date = pn.widgets.DatePicker(name="Start Date", value=pd.to_datetime("2010-01-01"))
@@ -136,7 +163,10 @@ metrics_pane = pn.pane.DataFrame(None, sizing_mode="stretch_width")
 
 #Layout
 template = pn.template.FastListTemplate(title = "Retail Investment Strategy Backtester",
-    sidebar=[ticker, 
+    sidebar=[stock_selection_title,
+             stock_selection_mode,
+             ticker_list_accordion,
+             ticker, 
              start_date, 
              end_date, 
              monthly_contrib,
