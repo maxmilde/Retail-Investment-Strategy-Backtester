@@ -6,6 +6,7 @@ The tool is intended for educational and anaytical purposes with the purpose to 
 
 ## To launch the app:
 `panel serve interface.py --autoreload --show`
+
 This will start a local server and open the app in your browser.
 
 
@@ -43,16 +44,16 @@ The following strategies can be selected simultaneously for comparison:
 
 
 ### Strategy parameters (rules)
-- Monthly Contribution ($)
+- **Monthly Contribution ($)**
     The fixed amount invested each month. 
 
-- Double Down Threshold
+- **Double Down Threshold**
     The relative price decline required to trigger an increased contribution under the Double Down DCA strategy. For example, a value of 0.15 implies that the monthly investment is increased when the asset price has fallen by at least 15% from the rolling 52-week-high.
 
-- SMA Period
+- **SMA Period**
     The number of past trading days used to compute the Simple Moving Average. 
 
-- Desired Monthly Growth Rate (Value Averaging)
+- **Desired Monthly Growth Rate (Value Averaging)**
     The target monthly growth rate of the portfolio under the Value Averaging strategy. Contributions are dynamically adjusted to keep the portfolio value close to a predefined growth path.
 
 
@@ -74,9 +75,11 @@ For each strategy, the application computes and displays:
 
 ## Notes
 The app is designed to run locally and does not require cloud deployment.
+
 Results depend on historical price data and do not constitute investment advice.
 
 
 ## Authors
 Maxim Milde & Zahid Pashayev
+
 Developed as a university project on Data Processing with Python
