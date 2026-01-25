@@ -1,6 +1,12 @@
 # Retail Investment Strategy Backtester
-This project is an interactive backtestng application that can be used to compare common retail investment strategies over historical equity data. The app allows the user to simulate and evaluate different controbution, timing, and portfolio construction rules using a graphical interface built with Panel.
+This project is an interactive backtesting engine that can be used to compare common retail investment strategies over historical equity data. The app allows the user to simulate and evaluate different contribution, timing, and portfolio construction rules using a graphical interface built with Panel.
+
 The tool is intended for educational and anaytical purposes with the purpose to provide insight into how different systematic investment approaches perform over time.
+
+
+## To launch the app:
+`panel serve interface.py --autoreload --show`
+This will start a local server and open the app in your browser.
 
 
 ## Features
@@ -15,7 +21,7 @@ The tool is intended for educational and anaytical purposes with the purpose to 
 
 
 ## Available Strategies
-The following strategies are implemented and can be selected simultaneously for comparison:
+The following strategies can be selected simultaneously for comparison:
 
 - **Dollar-Cost Averaging (DCA)**  
   Invests a fixed amount at regular monthly intervals, regardless of price.
@@ -36,6 +42,20 @@ The following strategies are implemented and can be selected simultaneously for 
   Targets a predefined portfolio growth path, investing more when the portfolio underperforms the target and less when it overperforms.
 
 
+### Strategy parameters (rules)
+- Monthly Contribution ($)
+    The fixed amount invested each month. 
+
+- Double Down Threshold
+    The relative price decline required to trigger an increased contribution under the Double Down DCA strategy. For example, a value of 0.15 implies that the monthly investment is increased when the asset price has fallen by at least 15% from the rolling 52-week-high.
+
+- SMA Period
+    The number of past trading days used to compute the Simple Moving Average. 
+
+- Desired Monthly Growth Rate (Value Averaging)
+    The target monthly growth rate of the portfolio under the Value Averaging strategy. Contributions are dynamically adjusted to keep the portfolio value close to a predefined growth path.
+
+
 ## Key Metrics
 For each strategy, the application computes and displays:
 - Total invested capital
@@ -47,4 +67,16 @@ For each strategy, the application computes and displays:
 - Calmar ratio
 - Investment horizon (years)
 
+
 ## Project Structure
+
+
+
+## Notes
+The app is designed to run locally and does not require cloud deployment.
+Results depend on historical price data and do not constitute investment advice.
+
+
+## Authors
+Maxim Milde & Zahid Pashayev
+Developed as a university project on Data Processing with Python
