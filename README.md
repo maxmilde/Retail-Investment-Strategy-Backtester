@@ -71,6 +71,7 @@ For each strategy the following risk metrics are computed:
 
 
 ## Project Structure:
+```text
 Project_python/
 ├── interface.py
 │   └── Panel-based user interface for running and comparing investment strategies
@@ -106,7 +107,7 @@ Project_python/
 │
 └── Project_python.ipynb
     └── Optional notebook used for development, testing, or exploration
-
+```text
 
 
 ## Notes:
