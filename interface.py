@@ -68,7 +68,6 @@ def get_selected_tickers():
 top15_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'BRK-B', 'META', 'UNH', 'JNJ', 'V', 'WMT', 'JPM', 'PG', 'MA']
 ticker_list_selector = pn.widgets.MultiSelect(options = top15_tickers, size=10)
 ticker_list = pn.Column(pn.pane.Markdown("### Select Ticker(s)"), ticker_list_selector)
-ticker_list.active = []
 ticker_list.visible=False #we hide it until "Ticker List" mode is selected
 
 #Sector Selection
@@ -210,6 +209,8 @@ strategy_selector.param.watch(update_visibility_sliders, "value")
 
 
 ####Output####
+error_pane = pn.pane.Alert("", alert_type="danger", visible=False)
+
 ##preview
 preview_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height=350)
 
@@ -240,7 +241,8 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
              plot_var, 
              run_button],
 
-    main=[pn.pane.Markdown("## Data Preview"),
+        main=[error_pane,
+          pn.pane.Markdown("## Data Preview"),
           preview_pane,
           pn.pane.Markdown("## Strategy Plot"),
           plot_pane,
@@ -250,109 +252,93 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
 template.servable()
 
 
+def run_simulation(event=None):
+    error_pane.visible = False
+    error_pane.object = ""
 
-####Simulation func####
-def run_simulation(simulation):
-    """Run the simulation with the specified parameters from the "Run Simulation" button"""
+    try:
+        selected_tickers = get_selected_tickers()
+        selected_strategies = strategy_selector.value
+        selected_var = plot_var_options[plot_var.value]
 
-    selected_tickers = get_selected_tickers()
+        if not selected_strategies:
+            raise ValueError("Please select at least one strategy.")
+        if not selected_tickers:
+            raise ValueError("Please select at least one ticker.")
 
-    selected_strategies = strategy_selector.value
-    selected_var = plot_var_options[plot_var.value]
-    start = start_date.value
-    end = end_date.value
-    monthly_c = monthly_contrib.value
-    growth = growth_slider.value
-    sma_p = sma_period_slider.value
-    dd_tresh = DD_treshold_slider.value
+        start_str = start_date.value.strftime("%Y-%m-%d")
+        end_str = end_date.value.strftime("%Y-%m-%d")
 
-    ##Data loading
-    try:    
-        df = load_price_data(selected_tickers, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        # ---- Load data ----
+        is_portfolio = len(selected_tickers) > 1
 
-        if df is None or df.empty:
-            raise ValueError(f"No data found for ticker '{selected_tickers}'.")
-        
-        preview_pane.object = df.hvplot.line(x="Date", y="Close", title=f'{selected_tickers} Price History', responsive=True)
-    
+        if is_portfolio:
+            merged = load_multiple_price_data(selected_tickers, start_str, end_str)
+            if merged is None or merged.empty:
+                raise ValueError("No data found for the selected tickers.")
+
+            preview_pane.object = merged.hvplot.line(
+                x="Date", y="Portfolio", title="Portfolio Price History", height=350, responsive=True
+            )
+            df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"})
+        else:
+            ticker = selected_tickers[0]
+            df = load_price_data(ticker, start_str, end_str)
+            if df is None or df.empty:
+                raise ValueError(f"No data found for ticker: {ticker}")
+
+            preview_pane.object = df.hvplot.line(
+                y="Close", title=f"{ticker} Price History", height=350, responsive=True
+            )
+
+        # ---- Run strategies ----
+        results = {}
+        if "DCA" in selected_strategies: results["DCA"] = dca_standard(df, monthly_contrib.value)
+        if "Double Down DCA" in selected_strategies: results["Double Down DCA"] = dca_DD(df, monthly_contrib.value, DD_treshold_slider.value)
+        if "Lump Sum" in selected_strategies: results["Lump Sum"] = lump_sum(df, monthly_contrib.value)
+        if "Simple Moving Average DCA - Momentum" in selected_strategies: results["SMA Momentum"] = dca_sma_mom(df, monthly_contrib.value, sma_period_slider.value)
+        if "Simple Moving Average DCA - Mean Reversion" in selected_strategies: results["SMA Mean Reversion"] = dca_sma_mean_rev(df, monthly_contrib.value, sma_period_slider.value)
+        if "Value Averaging" in selected_strategies: results["Value Averaging"] = value_averaging(df, growth_slider.value, monthly_contrib.value)
+
+        if not results:
+            raise ValueError("No strategies produced results.")
+
+        # ---- Plotting ----
+        def format_axis(plot, element):
+            fmt = "$0,0" if selected_var in ["portf_value", "invested_total", "profit_loss"] else "0,0"
+            plot.state.yaxis.formatter = NumeralTickFormatter(format=fmt)
+
+        plots = []
+        for name, df_result in results.items():
+            curve = df_result.hvplot(
+                y=selected_var,
+                label=name,
+                ylabel=var_labels.get(selected_var, selected_var),
+                title=f"{var_labels.get(selected_var, selected_var)} over Time",
+                height=350,
+                responsive=True
+            ).opts(hooks=[format_axis])
+            plots.append(curve)
+
+        combined_plot = plots[0]
+        for c in plots[1:]:
+            combined_plot *= c
+
+        plot_pane.object = combined_plot
+
+        # ---- Metrics ----
+        metrics_rows = []
+        for name, df_result in results.items():
+            m = compute_KeyMetrics(df_result)
+            m["Strategy"] = name
+            metrics_rows.append(m)
+
+        metrics_pane.object = pd.DataFrame(metrics_rows).set_index("Strategy")
 
     except Exception as e:
-        preview_pane.object = pn.pane.Markdown(f"**Error loading the data:** {str(e)}")
-        plot_pane.object = None
-        metrics_pane.object = None
+        error_pane.object = f"### ⚠️ Error: {e}"
+        error_pane.visible = True
         return
-
-
-    ##Strategies
-    results = {}
-
-    for strat in selected_strategies:
-        if strat == "DCA":
-            results["DCA"] = dca_standard(df, monthly_c)
-        
-        elif strat == "Double Down DCA":
-            results["Double Down DCA"] = dca_DD(df, monthly_c, dd_tresh)
-
-        elif strat == "Lump Sum":
-            results["Lump Sum"] = lump_sum(df, monthly_c)
-
-        elif strat == "Simple Moving Average DCA - Momentum":
-            results["SMA Momentum"] = dca_sma_mom(df, monthly_c, sma_p)
-        
-        elif strat == "Simple Moving Average DCA - Mean Reversion":
-            results["SMA Mean Reversion"] = dca_sma_mean_rev(df, monthly_c, sma_p)
-        
-        elif strat == "Value Averaging":
-            results["Value Averaging"] = value_averaging(df, growth, monthly_c)
-
-
-
-
-    ##Plotting
-    plots = []
-
-
-
-    def format_axis(plot, element):
-        """Format y-axis to show $ sign and commas for money variables """
-        fmt="$0,0" if selected_var in ["portf_value", "invested_total", "profit_loss"] else "0,0"
-        plot.state.yaxis.formatter = NumeralTickFormatter(format=fmt)
-
-
-
-    for name, df_result in results.items():
-        curve = df_result.hvplot(y=selected_var, 
-                                 ylabel=var_labels[selected_var], 
-                                 label=name, #legend label
-                                 title=f"{var_labels[selected_var]} over Time",
-                                 height=350, 
-                                 responsive=True).opts(hooks=[format_axis]) #format y-axis to financial notation
-        plots.append(curve)
-
-    interact_plot = plots[0]
-    for curve in plots[1:]:
-        interact_plot *= curve #add the curves on top of each other
-
-    plot_pane.object = interact_plot
-
-
-
-    ##Key Metrics table
-    metrics_list = []
-
-    for name, df_result in results.items():
-        try:
-            metrics = compute_KeyMetrics(df_result)
-            metrics["Strategy"] = name
-            metrics_list.append(metrics)
-        except Exception as e:
-            print(f'Error computing metrics for {name}: {e}')
-
-    
-    metrics_df = pd.DataFrame(metrics_list).set_index("Strategy")
-    metrics_pane.object = metrics_df
-
-
 
 ##connecting button with run_simulation
 run_button.on_click(run_simulation)
