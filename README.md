@@ -5,6 +5,7 @@ The tool is intended for educational and anaytical purposes with the intent to p
 
 
 ## To launch the app:
+in Terminal, write:
 `panel serve interface.py --autoreload --show`
 
 This will start a local server and open the app in your browser.
@@ -70,6 +71,41 @@ For each strategy the following risk metrics are computed:
 
 
 ## Project Structure:
+Project_python/
+├── interface.py
+│   └── Panel-based user interface for running and comparing investment strategies
+│
+├── dca_simulator/
+│   ├── __init__.py
+│   │
+│   ├── data_loader.py
+│   │   └── Functions to download and load price data (single and multiple tickers)
+│   │
+│   ├── data_processing.py
+│   │   └── Functions for cleaning and preparing data
+│   │
+│   ├── strategies.py
+│   │   └── Implementation of investment strategies (DCA, Double Down, SMA-based, Value Averaging, etc.)
+│   │
+│   ├── backtest.py
+│   │   └── Backtesting logic used by the strategies
+│   │
+│   ├── metrics.py
+│   │   └── Computation of performance metrics (ROI, CAGR, IRR, max drawdown, Calmar ratio, etc.)
+│   │
+│   ├── plots.py
+│   │   └── Plotting 
+│   │
+│   └── __pycache__/
+│
+├── requirements.txt
+│   └── Python dependencies (install by `pip install -r requirements.txt`)
+│
+├── README.md
+│   └── Project description, setup instructions, and usage guide
+│
+└── Project_python.ipynb
+    └── Optional notebook used for development, testing, or exploration
 
 
 
