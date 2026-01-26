@@ -115,6 +115,8 @@ The app is designed to run locally and does not require cloud deployment.
 
 Results depend on historical price data and do not constitute investment advice.
 
+In terms of limitations, there's a limit in yfinance rate meaning running the simulation too many times might return no results. 
+
 
 ## Authors
 Maxim Milde & Zahid Pashayev
