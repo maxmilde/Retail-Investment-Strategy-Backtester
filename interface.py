@@ -4,6 +4,7 @@ import datetime as dt
 pn.extension()
 import hvplot.pandas
 import holoviews as hv
+import threading
 from bokeh.models import HoverTool
 from bokeh.models import NumeralTickFormatter
 
@@ -211,6 +212,10 @@ strategy_selector.param.watch(update_visibility_sliders, "value")
 ####Output####
 error_pane = pn.pane.Alert("", alert_type="danger", visible=False)
 
+##loading / status feedback
+loading_spinner = pn.indicators.LoadingSpinner(value=True, visible=False, width=24, height=24)
+status_pane = pn.pane.Markdown("", visible=False, sizing_mode="stretch_width")
+
 ##preview
 preview_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height=350)
 
@@ -241,7 +246,8 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
              plot_var, 
              run_button],
 
-        main=[error_pane,
+        main=[pn.Row(loading_spinner, status_pane),
+          error_pane,
           pn.pane.Markdown("## Data Preview"),
           preview_pane,
           pn.pane.Markdown("## Strategy Plot"),
@@ -251,94 +257,152 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
 
 template.servable()
 
+def _safe_next_tick(fn):
+    """
+    Ensure UI updates happen on the Bokeh/Panel document thread.
+    Falls back to direct execution if no server document is available.
+    """
+    doc = getattr(pn.state, "curdoc", None)
+    if doc is None:
+        fn()
+    else:
+        doc.add_next_tick_callback(fn)
 
-def run_simulation(event=None):
+def _set_loading(is_loading: bool, message: str = ""):
+    loading_spinner.visible = is_loading
+    status_pane.visible = bool(message) or is_loading
+    status_pane.object = message
+    run_button.disabled = is_loading
+
+def _set_error(message: str):
+    error_pane.object = f"### Error: {message}"
+    error_pane.visible = True
+
+def _clear_error():
     error_pane.visible = False
     error_pane.object = ""
 
-    try:
-        selected_tickers = get_selected_tickers()
-        selected_strategies = strategy_selector.value
-        selected_var = plot_var_options[plot_var.value]
+def _set_status(message: str):
+    # Keep spinner state as-is; just update text.
+    status_pane.visible = True
+    status_pane.object = message
 
-        if not selected_strategies:
-            raise ValueError("Please select at least one strategy.")
-        if not selected_tickers:
-            raise ValueError("Please select at least one ticker.")
 
-        start_str = start_date.value.strftime("%Y-%m-%d")
-        end_str = end_date.value.strftime("%Y-%m-%d")
+def run_simulation(event=None):
+    # UI updates first so the user immediately sees feedback
+    _clear_error()
+    _set_loading(True, "Running simulation…")
 
-        # ---- Load data ----
-        is_portfolio = len(selected_tickers) > 1
+    # Snapshot inputs (avoid reading widget state from a background thread)
+    selected_tickers = get_selected_tickers()
+    selected_strategies = list(strategy_selector.value or [])
+    selected_var = plot_var_options[plot_var.value]
+    monthly_contrib_value = monthly_contrib.value
+    dd_threshold_value = DD_treshold_slider.value
+    sma_period_value = sma_period_slider.value
+    growth_value = growth_slider.value
+    start_value = start_date.value
+    end_value = end_date.value
 
-        if is_portfolio:
-            merged = load_multiple_price_data(selected_tickers, start_str, end_str)
-            if merged is None or merged.empty:
-                raise ValueError("No data found for the selected tickers.")
+    def worker():
+        try:
+            if not selected_strategies:
+                raise ValueError("Please select at least one strategy.")
+            if not selected_tickers:
+                raise ValueError("Please select at least one ticker.")
 
-            preview_pane.object = merged.hvplot.line(
-                x="Date", y="Portfolio", title="Portfolio Price History", height=350, responsive=True
-            )
-            df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"})
-        else:
-            ticker = selected_tickers[0]
-            df = load_price_data(ticker, start_str, end_str)
-            if df is None or df.empty:
-                raise ValueError(f"No data found for ticker: {ticker}")
+            start_str = start_value.strftime("%Y-%m-%d")
+            end_str = end_value.strftime("%Y-%m-%d")
 
-            preview_pane.object = df.hvplot.line(
-                y="Close", title=f"{ticker} Price History", height=350, responsive=True
-            )
+            _safe_next_tick(lambda: _set_status("Loading price data…"))
 
-        # ---- Run strategies ----
-        results = {}
-        if "DCA" in selected_strategies: results["DCA"] = dca_standard(df, monthly_contrib.value)
-        if "Double Down DCA" in selected_strategies: results["Double Down DCA"] = dca_DD(df, monthly_contrib.value, DD_treshold_slider.value)
-        if "Lump Sum" in selected_strategies: results["Lump Sum"] = lump_sum(df, monthly_contrib.value)
-        if "Simple Moving Average DCA - Momentum" in selected_strategies: results["SMA Momentum"] = dca_sma_mom(df, monthly_contrib.value, sma_period_slider.value)
-        if "Simple Moving Average DCA - Mean Reversion" in selected_strategies: results["SMA Mean Reversion"] = dca_sma_mean_rev(df, monthly_contrib.value, sma_period_slider.value)
-        if "Value Averaging" in selected_strategies: results["Value Averaging"] = value_averaging(df, growth_slider.value, monthly_contrib.value)
+            # ---- Load data ----
+            is_portfolio = len(selected_tickers) > 1
 
-        if not results:
-            raise ValueError("No strategies produced results.")
+            if is_portfolio:
+                merged = load_multiple_price_data(selected_tickers, start_str, end_str)
+                if merged is None or merged.empty:
+                    raise ValueError("No data found for the selected tickers.")
 
-        # ---- Plotting ----
-        def format_axis(plot, element):
-            fmt = "$0,0" if selected_var in ["portf_value", "invested_total", "profit_loss"] else "0,0"
-            plot.state.yaxis.formatter = NumeralTickFormatter(format=fmt)
+                preview_obj = merged.hvplot.line(
+                    x="Date", y="Portfolio", title="Portfolio Price History", height=350, responsive=True
+                )
+                df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"})
+            else:
+                ticker = selected_tickers[0]
+                df = load_price_data(ticker, start_str, end_str)
+                if df is None or df.empty:
+                    raise ValueError(f"No data found for ticker: {ticker}")
 
-        plots = []
-        for name, df_result in results.items():
-            curve = df_result.hvplot(
-                y=selected_var,
-                label=name,
-                ylabel=var_labels.get(selected_var, selected_var),
-                title=f"{var_labels.get(selected_var, selected_var)} over Time",
-                height=350,
-                responsive=True
-            ).opts(hooks=[format_axis])
-            plots.append(curve)
+                preview_obj = df.hvplot.line(
+                    y="Close", title=f"{ticker} Price History", height=350, responsive=True
+                )
 
-        combined_plot = plots[0]
-        for c in plots[1:]:
-            combined_plot *= c
+            _safe_next_tick(lambda: _set_status("Running strategies…"))
 
-        plot_pane.object = combined_plot
+            # ---- Run strategies ----
+            results = {}
+            if "DCA" in selected_strategies:
+                results["DCA"] = dca_standard(df, monthly_contrib_value)
+            if "Double Down DCA" in selected_strategies:
+                results["Double Down DCA"] = dca_DD(df, monthly_contrib_value, dd_threshold_value)
+            if "Lump Sum" in selected_strategies:
+                results["Lump Sum"] = lump_sum(df, monthly_contrib_value)
+            if "Simple Moving Average DCA - Momentum" in selected_strategies:
+                results["SMA Momentum"] = dca_sma_mom(df, monthly_contrib_value, sma_period_value)
+            if "Simple Moving Average DCA - Mean Reversion" in selected_strategies:
+                results["SMA Mean Reversion"] = dca_sma_mean_rev(df, monthly_contrib_value, sma_period_value)
+            if "Value Averaging" in selected_strategies:
+                results["Value Averaging"] = value_averaging(df, growth_value, monthly_contrib_value)
 
-        # ---- Metrics ----
-        metrics_rows = []
-        for name, df_result in results.items():
-            m = compute_KeyMetrics(df_result)
-            m["Strategy"] = name
-            metrics_rows.append(m)
+            if not results:
+                raise ValueError("No strategies produced results.")
 
-        metrics_pane.object = pd.DataFrame(metrics_rows).set_index("Strategy")
+            _safe_next_tick(lambda: _set_status("Building plots and metrics…"))
 
-    except Exception as e:
-        error_pane.object = f"### ⚠️ Error: {e}"
-        error_pane.visible = True
-        return
+            # ---- Plotting ----
+            def format_axis(plot, element):
+                fmt = "$0,0" if selected_var in ["portf_value", "invested_total", "profit_loss"] else "0,0"
+                plot.state.yaxis.formatter = NumeralTickFormatter(format=fmt)
+
+            plots = []
+            for name, df_result in results.items():
+                curve = df_result.hvplot(
+                    y=selected_var,
+                    label=name,
+                    ylabel=var_labels.get(selected_var, selected_var),
+                    title=f"{var_labels.get(selected_var, selected_var)} over Time",
+                    height=350,
+                    responsive=True
+                ).opts(hooks=[format_axis])
+                plots.append(curve)
+
+            combined_plot = plots[0]
+            for c in plots[1:]:
+                combined_plot *= c
+
+            # ---- Metrics ----
+            metrics_rows = []
+            for name, df_result in results.items():
+                m = compute_KeyMetrics(df_result)
+                m["Strategy"] = name
+                metrics_rows.append(m)
+            metrics_df = pd.DataFrame(metrics_rows).set_index("Strategy")
+
+            def apply_success():
+                preview_pane.object = preview_obj
+                plot_pane.object = combined_plot
+                metrics_pane.object = metrics_df
+
+            _safe_next_tick(apply_success)
+
+        except Exception as e:
+            _safe_next_tick(lambda: _set_error(str(e)))
+
+        finally:
+            _safe_next_tick(lambda: _set_loading(False, ""))
+
+    threading.Thread(target=worker, daemon=True).start()
 
 ##connecting button with run_simulation
 run_button.on_click(run_simulation)
