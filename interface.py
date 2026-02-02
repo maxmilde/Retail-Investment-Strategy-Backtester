@@ -42,6 +42,9 @@ def update_stock_selection(event):
     elif mode == "Sector":
         sector_selector.visible = True
         ticker_list.visible = True
+        first_sector = list(sector_tickers.keys())[0] #select the first sector by default
+        ticker_list_selector.options = sector_tickers[first_sector]
+        ticker_list_selector.value = sector_tickers[first_sector][:] #select all tickers in the sector by default
 
     elif mode == "Manual Input":
         ticker_text.visible = True
@@ -269,31 +272,42 @@ def _safe_next_tick(fn):
         doc.add_next_tick_callback(fn)
 
 def _set_loading(is_loading: bool, message: str = ""):
-    loading_spinner.visible = is_loading
+    """
+    Update loading spinner and status pane state.
+    """
+    loading_spinner.visible = is_loading #show spinner when loading
     status_pane.visible = bool(message) or is_loading
     status_pane.object = message
-    run_button.disabled = is_loading
+    run_button.disabled = is_loading #disable run button when loading
 
 def _set_error(message: str):
+    """
+    Display an error message in the error pane.
+    """
     error_pane.object = f"### Error: {message}"
     error_pane.visible = True
 
 def _clear_error():
+    """
+    Clear any existing error message."""
     error_pane.visible = False
     error_pane.object = ""
 
 def _set_status(message: str):
-    # Keep spinner state as-is; just update text.
+    """
+    Update status pane with a message, without changing loading spinner state.
+    """
     status_pane.visible = True
     status_pane.object = message
 
 
 def run_simulation(event=None):
+    """Run the simulation based on inputs"""
     # UI updates first so the user immediately sees feedback
-    _clear_error()
+    _clear_error() #clear previous errors
     _set_loading(True, "Running simulation…")
 
-    # Snapshot inputs (avoid reading widget state from a background thread)
+    # Copy all user inputs (on main thread) so the background thread can use these frozen values safely
     selected_tickers = get_selected_tickers()
     selected_strategies = list(strategy_selector.value or [])
     selected_var = plot_var_options[plot_var.value]
@@ -304,17 +318,24 @@ def run_simulation(event=None):
     start_value = start_date.value
     end_value = end_date.value
 
-    def worker():
-        try:
-            if not selected_strategies:
-                raise ValueError("Please select at least one strategy.")
-            if not selected_tickers:
-                raise ValueError("Please select at least one ticker.")
+    if not selected_strategies:
+        _set_error("Please select at least one strategy.")
+        _set_loading(False, "")
+        return
+    
+    if not selected_tickers:
+        _set_error("Please select at least one ticker.")
+        _set_loading(False, "")
+        return
+        
 
+    def worker(): #this runs in a background thread
+        try:
+            # ---- Prepare date strings ----
             start_str = start_value.strftime("%Y-%m-%d")
             end_str = end_value.strftime("%Y-%m-%d")
 
-            _safe_next_tick(lambda: _set_status("Loading price data…"))
+            _safe_next_tick(lambda: _set_status("Loading price data…")) #update status on main thread from background thread
 
             # ---- Load data ----
             is_portfolio = len(selected_tickers) > 1
@@ -324,10 +345,19 @@ def run_simulation(event=None):
                 if merged is None or merged.empty:
                     raise ValueError("No data found for the selected tickers.")
 
-                preview_obj = merged.hvplot.line(
-                    x="Date", y="Portfolio", title="Portfolio Price History", height=350, responsive=True
-                )
-                df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"})
+                price_cols = [c for c in merged.columns if c not in ["Date", "Portfolio"]] #price columns for each ticker
+
+                preview_obj = merged.hvplot.line(x="Date", 
+                                                 y=price_cols,
+                                                 ylabel="Stock Price ($)", 
+                                                 title="Selected Tickers Price History", 
+                                                 height=500, responsive=True,
+                                                 legend="left",
+                                                 line_width=1).opts(legend_spacing=1)
+
+                df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"}) #strategies use the portfolio average, not individual tickers
+
+
             else:
                 ticker = selected_tickers[0]
                 df = load_price_data(ticker, start_str, end_str)
@@ -335,10 +365,11 @@ def run_simulation(event=None):
                     raise ValueError(f"No data found for ticker: {ticker}")
 
                 preview_obj = df.hvplot.line(
-                    y="Close", title=f"{ticker} Price History", height=350, responsive=True
-                )
+                    y="Close", title=f"{ticker} Price History", height=350, responsive=True)
+
 
             _safe_next_tick(lambda: _set_status("Running strategies…"))
+
 
             # ---- Run strategies ----
             results = {}
@@ -370,7 +401,7 @@ def run_simulation(event=None):
                 curve = df_result.hvplot(
                     y=selected_var,
                     label=name,
-                    ylabel=var_labels.get(selected_var, selected_var),
+                    ylabel=var_labels.get(selected_var, selected_var), #default to variable name if no label found
                     title=f"{var_labels.get(selected_var, selected_var)} over Time",
                     height=350,
                     responsive=True
@@ -379,7 +410,7 @@ def run_simulation(event=None):
 
             combined_plot = plots[0]
             for c in plots[1:]:
-                combined_plot *= c
+                combined_plot *= c #overlay plots
 
             # ---- Metrics ----
             metrics_rows = []
@@ -390,19 +421,23 @@ def run_simulation(event=None):
             metrics_df = pd.DataFrame(metrics_rows).set_index("Strategy")
 
             def apply_success():
+                """
+                Update the UI with results from the simulation.
+                """
                 preview_pane.object = preview_obj
                 plot_pane.object = combined_plot
                 metrics_pane.object = metrics_df
 
-            _safe_next_tick(apply_success)
+            _safe_next_tick(apply_success) #update UI on main thread, no lamda needed because apply_success has no arguments
 
         except Exception as e:
+            print(f"Error during simulation: {e}")
             _safe_next_tick(lambda: _set_error(str(e)))
 
         finally:
             _safe_next_tick(lambda: _set_loading(False, ""))
 
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=worker, daemon=True).start() #start background thread to run simulation, daemon=True so it exits when main program exits
 
 ##connecting button with run_simulation
 run_button.on_click(run_simulation)
