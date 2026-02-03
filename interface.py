@@ -22,6 +22,27 @@ ticker_text = pn.widgets.TextInput(name="Ticker Text", value="AAPL", width=150)
 ticker_text.visible = False #we hide it until "Manual Input" mode is selected
 stock_selection_title = pn.pane.Markdown("### Select Stocks or Indices by:")
 
+def validate_ticker(event=None):
+    """Validate ticker format"""
+    ticker = ticker_text.value
+    
+    if not ticker:
+        ticker_text.styles = {'border': 'none'} #reset styles
+        return True #empty is okay, we just won't run the simulation until they enter something
+
+    if len(ticker) > 5:
+        ticker_text.styles = {'border': '2px solid red'}
+        return False
+    
+    if not all(c.isalnum() or c=='-' or c=='.' for c in ticker):
+        ticker_text.styles = {'border': '2px solid red'}
+        return False
+    
+    ticker_text.styles = {'border': 'none'} #reset styles
+    return True 
+ticker_text.param.watch(validate_ticker, 'value')
+
+
 #ticker selection bar
 stock_selection_mode = pn.widgets.RadioButtonGroup(options=["Ticker List", "Sector", "Manual Input"], button_type="primary")
 stock_selection_mode.value = None #no mode selected at the beginning
@@ -62,7 +83,7 @@ def get_selected_tickers():
         return ticker_list_selector.value
     
     elif mode == "Manual Input":
-        return [ticker_text.value] if ticker_text.value else []
+        return [ticker_text.value.strip().upper()] if ticker_text.value else []
     
     else:
         return []
@@ -112,11 +133,32 @@ sector_selector.param.watch(update_sector_selection, "value")
 start_date = pn.widgets.DatePicker(name="Start Date", value=pd.to_datetime("2010-01-01"))
 end_date = pn.widgets.DatePicker(name="End Date", value=dt.date.today())
 
+date_error_pane = pn.pane.Alert("", alert_type="warning", visible=False, sizing_mode="stretch_width")
+
+def validate_dates(event=None):
+    """Validate that start date is before end date"""
+    start = start_date.value
+    end = end_date.value
+
+    if start >= end:
+        date_error_pane.object = "Start Date must be before End Date."
+        date_error_pane.visible = True
+        return False
+    else:
+        date_error_pane.visible = False
+        return True
+    
+#watch for changes in date pickers
+start_date.param.watch(validate_dates, 'value')
+end_date.param.watch(validate_dates, 'value')
+
+
+
 ##sliders for strategy parameters
 monthly_contrib = pn.widgets.IntSlider(name="Monthly Contribution ($)", start=50, end=1000, step=50, value=150)
 growth_slider = pn.widgets.FloatSlider(name="Desired Monthly Growth rate (SMA)", start=0.001, end=0.01, step=0.001, value=0.006, format="0.000")
-sma_period_slider = pn.widgets.IntSlider(name="SMA period", start=10, end=300, step=10, value=90)
-DD_treshold_slider = pn.widgets.FloatSlider(name="Double Down Treshold", start=0.05, end=0.6, step=0.05, value=0.15)
+sma_period_slider = pn.widgets.IntSlider(name="SMA period", start=5, end=365, step=5, value=90)
+DD_treshold_slider = pn.widgets.FloatSlider(name="Double Down Treshold", start=0.05, end=0.1, step=0.05, value=0.15)
 
 growth_slider.visible = False #because we only want them to appear when the relevant strategy is selected
 sma_period_slider.visible = False
@@ -159,7 +201,8 @@ plot_var = pn.widgets.Select(name="Variable to plot",
                              options=list(plot_var_options.keys()),
                              value="Portfolio Value ($)")
 
-##run button
+##run and preview buttons
+preview_button = pn.widgets.Button(name="Preview Data", button_type="primary")
 run_button = pn.widgets.Button(name="Run Simulation", button_type="primary")
 
 
@@ -216,11 +259,13 @@ strategy_selector.param.watch(update_visibility_sliders, "value")
 error_pane = pn.pane.Alert("", alert_type="danger", visible=False)
 
 ##loading / status feedback
-loading_spinner = pn.indicators.LoadingSpinner(value=True, visible=False, width=24, height=24)
+loading_spinner = pn.indicators.LoadingSpinner(value=True, visible=False, width=40, height=40)
 status_pane = pn.pane.Markdown("", visible=False, sizing_mode="stretch_width")
+status_row = pn.Row(loading_spinner, status_pane, visible=False)
 
-##preview
+##preview and stats
 preview_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height=350)
+stats_pane = pn.pane.Markdown("", visible=False, sizing_mode="stretch_width")
 
 ##plot
 plot_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height = 350)
@@ -229,8 +274,10 @@ plot_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height = 350)
 metrics_pane = pn.pane.DataFrame(None, sizing_mode="stretch_width")
 
 
-#Layout
-template = pn.template.FastListTemplate(title = "Retail Investment Strategy Backtester",
+#Layout 
+template = pn.template.FastListTemplate(title = "Retail Investment Strategy Backtester", 
+                                        header_background="#2C435B", 
+                                        accent_base_color="#2C435B",
     sidebar=[stock_selection_title,
              stock_selection_mode,
              sector_selector,
@@ -238,6 +285,8 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
              ticker_text, 
              start_date, 
              end_date, 
+             date_error_pane,
+             preview_button,
              monthly_contrib,
              DD_treshold_slider,
              sma_period_slider,
@@ -249,16 +298,19 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
              plot_var, 
              run_button],
 
-        main=[pn.Row(loading_spinner, status_pane),
-          error_pane,
-          pn.pane.Markdown("## Data Preview"),
-          preview_pane,
-          pn.pane.Markdown("## Strategy Plot"),
-          plot_pane,
-          pn.pane.Markdown("## Key Metrics"),
-          metrics_pane])
-
+        main=[status_row,
+              error_pane,
+              pn.pane.Markdown("## Data Preview"),
+              preview_pane,
+              stats_pane,
+              pn.pane.Markdown("## Strategy Plot"),
+              plot_pane,
+              pn.pane.Markdown("## Key Metrics"),
+              metrics_pane])
 template.servable()
+
+
+
 
 def _safe_next_tick(fn):
     """
@@ -277,6 +329,7 @@ def _set_loading(is_loading: bool, message: str = ""):
     """
     loading_spinner.visible = is_loading #show spinner when loading
     status_pane.visible = bool(message) or is_loading
+    status_row.visible = is_loading or bool(message)
     status_pane.object = message
     run_button.disabled = is_loading #disable run button when loading
 
@@ -301,6 +354,95 @@ def _set_status(message: str):
     status_pane.object = message
 
 
+def preview_data(event=None):
+    """Load and display price data without running strategies"""
+    _clear_error()
+    _set_loading(True, "Loading data preview…")
+
+    # Copy user inputs
+    selected_tickers = get_selected_tickers()
+    start_value = start_date.value
+    end_value = end_date.value
+
+    # ---- Input validation ----
+    if not validate_dates():
+        _set_error("Invalid date range. Start Date must be before End Date.")
+        _set_loading(False)
+        return
+    
+    if not selected_tickers:
+        _set_error("Please select at least one ticker.")
+        _set_loading(False)
+        return
+    
+    if stock_selection_mode.value =="Manual Input" and not validate_ticker():
+        _set_error("Invalid ticker format. Only uppercase letters, numbers, '-', and '.' are allowed, with a maximum length of 5 characters.")
+        _set_loading(False)
+        return
+    
+    def worker():
+        try:
+            start_str = start_value.strftime("%Y-%m-%d")
+            end_str = end_value.strftime("%Y-%m-%d")
+
+            is_portfolio = len(selected_tickers) > 1
+
+            if is_portfolio:
+                _safe_next_tick(lambda: _set_status(f"Loading price data for {len(selected_tickers)} tickers"))
+
+                merged = load_multiple_price_data(selected_tickers, start_str, end_str)
+                if merged is None or merged.empty:
+                    raise ValueError("No data found for the selected tickers.")
+
+                price_cols = [c for c in merged.columns if c not in ["Date", "Portfolio"]]
+
+                preview_obj = merged.hvplot.line(x="Date", 
+                                                 y=price_cols,
+                                                 ylabel="Stock Price ($)", 
+                                                 title="Selected Tickers Price History", 
+                                                 height=500, responsive=True,
+                                                 legend="left",
+                                                 line_width=1).opts(legend_spacing=1)
+                
+                stats_text = f"""### Price Statistics (Portfolio Average)
+- **Min Price:** ${merged["Portfolio"].min():,.2f}
+- **Max Price:** ${merged["Portfolio"].max():,.2f}
+- **Mean Price:** ${merged["Portfolio"].mean():,.2f}
+- **Std Dev:** ${merged["Portfolio"].std():,.2f}"""
+
+            else:
+                _safe_next_tick(lambda: _set_status(f"Loading price data for {selected_tickers[0]}")) 
+                ticker = selected_tickers[0]
+                df = load_price_data(ticker, start_str, end_str)
+                if df is None or df.empty:
+                    raise ValueError(f"No data found for ticker: {ticker}")
+
+                preview_obj = df.hvplot.line(
+                    y="Close", title=f"{ticker} Price History", height=350, responsive=True)
+                
+                stats_text = f"""### Price Statistics ({ticker})
+- **Min Price:** ${df["Close"].min():,.2f}
+- **Max Price:** ${df["Close"].max():,.2f}
+- **Mean Price:** ${df["Close"].mean():,.2f}
+- **Std Dev:** ${df["Close"].std():,.2f}"""
+
+            def apply_preview():
+                """Update UI with preview results"""
+                preview_pane.object = preview_obj
+                stats_pane.object = stats_text
+                stats_pane.visible = True
+            _safe_next_tick(apply_preview)
+
+        except Exception as e:
+            print(f"Error during data preview: {e}")
+            _safe_next_tick(lambda: _set_error(str(e)))
+
+        finally:
+            _safe_next_tick(lambda: _set_loading(False, ""))
+    threading.Thread(target=worker, daemon=True).start()
+preview_button.on_click(preview_data)
+
+
 def run_simulation(event=None):
     """Run the simulation based on inputs"""
     # UI updates first so the user immediately sees feedback
@@ -318,6 +460,19 @@ def run_simulation(event=None):
     start_value = start_date.value
     end_value = end_date.value
 
+
+    # ---- Input validation ----
+    if not validate_dates():
+        _set_error("Invalid date range. Start Date must be before End Date.")
+        _set_loading(False, "")
+        return
+    
+    if start_value.year < 1970:
+        _set_error("Start Date is too far in the past. Most stock data is not available before 1970.")
+        _set_loading(False, "")
+        return
+
+
     if not selected_strategies:
         _set_error("Please select at least one strategy.")
         _set_loading(False, "")
@@ -327,7 +482,11 @@ def run_simulation(event=None):
         _set_error("Please select at least one ticker.")
         _set_loading(False, "")
         return
-        
+    
+    if stock_selection_mode.value =="Manual Input" and not validate_ticker():
+        _set_error("Invalid ticker format. Only uppercase letters, numbers, '-', and '.' are allowed, with a maximum length of 5 characters.")
+        _set_loading(False, "")
+        return
 
     def worker(): #this runs in a background thread
         try:
@@ -335,12 +494,13 @@ def run_simulation(event=None):
             start_str = start_value.strftime("%Y-%m-%d")
             end_str = end_value.strftime("%Y-%m-%d")
 
-            _safe_next_tick(lambda: _set_status("Loading price data…")) #update status on main thread from background thread
-
+            
             # ---- Load data ----
             is_portfolio = len(selected_tickers) > 1
 
             if is_portfolio:
+                _safe_next_tick(lambda: _set_status(f"Loading price data for {len(selected_tickers)} tickers")) #update status on main thread from background thread
+
                 merged = load_multiple_price_data(selected_tickers, start_str, end_str)
                 if merged is None or merged.empty:
                     raise ValueError("No data found for the selected tickers.")
@@ -359,6 +519,7 @@ def run_simulation(event=None):
 
 
             else:
+                _safe_next_tick(lambda: _set_status(f"Loading price data for {selected_tickers[0]}")) 
                 ticker = selected_tickers[0]
                 df = load_price_data(ticker, start_str, end_str)
                 if df is None or df.empty:

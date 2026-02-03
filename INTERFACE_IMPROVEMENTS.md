@@ -101,6 +101,11 @@
      - Use constants for magic numbers (e.g., default dates, slider ranges)
    - **Implementation**: Refactor into a package structure with clear separation of concerns
 
+## 11. **Comments From SIS***
+    - instruction to run in README should also include installing the requirements first
+    - functions should do just one thing 
+    - cant select tickers that are not sequences
+
 ---
 
 ## Priority Recommendations
