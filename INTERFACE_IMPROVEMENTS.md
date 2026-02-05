@@ -106,6 +106,7 @@
     - functions should do just one thing 
     - cant select tickers that are not sequences
     - graph on-line signif fig
+    - segment sidebar better
     
 
 ---

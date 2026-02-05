@@ -4,9 +4,17 @@ This project is an interactive backtesting engine that can be used to compare co
 The tool is intended for educational and anaytical purposes with the intent to provide insight into how different  investment approaches perform over time.
 
 
+
+## Install dependencies:
+```bash
+  pip install -r requirements.txt
+```
+
 ## To launch the app:
 in Terminal, write:
-`panel serve interface.py --autoreload --show`
+```bash
+panel serve interface.py --autoreload --show`
+```
 
 This will start a local server and open the app in your browser.
 
