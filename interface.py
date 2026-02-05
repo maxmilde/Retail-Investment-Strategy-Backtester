@@ -1,7 +1,7 @@
 import panel as pn
 import pandas as pd
 import datetime as dt
-pn.extension()
+pn.extension('tabulator')
 import hvplot.pandas
 import holoviews as hv
 import threading
@@ -135,6 +135,44 @@ end_date = pn.widgets.DatePicker(name="End Date", value=dt.date.today())
 
 date_error_pane = pn.pane.Alert("", alert_type="warning", visible=False, sizing_mode="stretch_width")
 
+time_period_buttons = pn.widgets.RadioButtonGroup(name="Quick Select Time Period",
+                                                  options=["1Yr", "5Yrs", "10Yrs", "Max", "Custom"],
+                                                  button_type="default",
+                                                  value="Custom")
+
+
+def update_time_period(event):
+    """Update date pickers based on selected time period"""
+    period = event.new
+    today = pd.Timestamp(dt.date.today())
+
+    if period == "1Yr":
+        start_date.value = (today - pd.DateOffset(years=1)).date()
+        end_date.value = today
+        start_date.disabled = True
+        end_date.disabled = True
+    elif period == "5Yrs":
+        start_date.value = (today - pd.DateOffset(years=5)).date()
+        end_date.value = today
+        start_date.disabled = True
+        end_date.disabled = True
+    elif period == "10Yrs":
+        start_date.value = (today - pd.DateOffset(years=10)).date()
+        end_date.value = today
+        start_date.disabled = True
+        end_date.disabled = True
+    elif period == "Max":
+        start_date.value = dt.date(1971, 1, 1)
+        end_date.value = today
+        start_date.disabled = True
+        end_date.disabled = True
+    elif period == "Custom":
+        start_date.disabled = False
+        end_date.disabled = False
+time_period_buttons.param.watch(update_time_period, 'value')
+
+
+
 def validate_dates(event=None):
     """Validate that start date is before end date"""
     start = start_date.value
@@ -158,11 +196,50 @@ end_date.param.watch(validate_dates, 'value')
 monthly_contrib = pn.widgets.IntSlider(name="Monthly Contribution ($)", start=50, end=1000, step=50, value=150)
 growth_slider = pn.widgets.FloatSlider(name="Desired Monthly Growth rate (SMA)", start=0.001, end=0.01, step=0.001, value=0.006, format="0.000")
 sma_period_slider = pn.widgets.IntSlider(name="SMA period", start=5, end=365, step=5, value=90)
-DD_treshold_slider = pn.widgets.FloatSlider(name="Double Down Treshold", start=0.05, end=0.1, step=0.05, value=0.15)
+DD_treshold_slider = pn.widgets.FloatSlider(name="Double Down Treshold", start=0.05, end=1, step=0.05, value=0.15)
 
 growth_slider.visible = False #because we only want them to appear when the relevant strategy is selected
 sma_period_slider.visible = False
 DD_treshold_slider.visible = False 
+
+
+preset_configs = {
+    "Conserv.": {"monthly_contrib": 100, "DD_treshold": 0.2, "sma_period": 200, "growth_rate": 0.004, "description": "Lower monthly contribution, higher double down treshold, longer SMA period, and lower growth rate for value averaging."},
+    "Balanced": {"monthly_contrib": 400, "DD_treshold": 0.15, "sma_period": 100, "growth_rate": 0.006, "description": "Moderate monthly contribution, double down treshold, SMA period, and growth rate for value averaging."},
+    "Aggress.": {"monthly_contrib": 800, "DD_treshold": 0.1, "sma_period": 50, "growth_rate": 0.008, "description": "Higher monthly contribution, lower double down treshold, shorter SMA period, and higher growth rate for value averaging."}}
+
+
+strategy_presets = pn.widgets.RadioButtonGroup(name="Strategy Presets",
+                                               options=["Conserv.", "Balanced", "Aggress.", "Custom"],
+                                               button_type="default",
+                                               value="Custom")
+preset_info_pane = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+
+def update_preset_info(event):
+    """Update preset info pane based on selected preset"""
+    preset = event.new
+    
+    if preset == "Custom":
+        monthly_contrib.disabled = False
+        DD_treshold_slider.disabled = False
+        sma_period_slider.disabled = False
+        growth_slider.disabled = False
+        preset_info_pane.object = ""
+    else:
+        config = preset_configs[preset]
+        monthly_contrib.value = config["monthly_contrib"]
+        DD_treshold_slider.value = config["DD_treshold"]
+        sma_period_slider.value = config["sma_period"]
+        growth_slider.value = config["growth_rate"]
+
+        monthly_contrib.disabled = True
+        DD_treshold_slider.disabled = True
+        sma_period_slider.disabled = True
+        growth_slider.disabled = True
+
+        preset_info_pane.object = f"""**{preset}:** {config["description"]}"""
+strategy_presets.param.watch(update_preset_info, "value")
 
 
 
@@ -271,7 +348,7 @@ stats_pane = pn.pane.Markdown("", visible=False, sizing_mode="stretch_width")
 plot_pane = pn.pane.HoloViews(None, sizing_mode="stretch_width", height = 350)
 
 ##metrics comparison table
-metrics_pane = pn.pane.DataFrame(None, sizing_mode="stretch_width")
+metrics_pane = pn.widgets.Tabulator(None, sizing_mode="stretch_width", disabled=True, theme='bootstrap')
 
 
 #Layout 
@@ -283,10 +360,15 @@ template = pn.template.FastListTemplate(title = "Retail Investment Strategy Back
              sector_selector,
              ticker_list,
              ticker_text, 
-             start_date, 
-             end_date, 
+             pn.pane.Markdown("### Time Period"),
+             time_period_buttons,
+             start_date,
+             end_date,
              date_error_pane,
              preview_button,
+             pn.pane.Markdown("### Strategy Parameters"),
+             strategy_presets,
+             preset_info_pane,
              monthly_contrib,
              DD_treshold_slider,
              sma_period_slider,
@@ -396,13 +478,17 @@ def preview_data(event=None):
 
                 price_cols = [c for c in merged.columns if c not in ["Date", "Portfolio"]]
 
+
+                def format_preview_axis(plot, element):
+                    plot.state.yaxis.formatter = NumeralTickFormatter(format="$0,0")
+
                 preview_obj = merged.hvplot.line(x="Date", 
                                                  y=price_cols,
                                                  ylabel="Stock Price ($)", 
                                                  title="Selected Tickers Price History", 
                                                  height=500, responsive=True,
                                                  legend="left",
-                                                 line_width=1).opts(legend_spacing=1)
+                                                 line_width=1).opts(legend_spacing=1, hooks=[format_preview_axis])
                 
                 stats_text = f"""### Price Statistics (Portfolio Average)
 - **Min Price:** ${merged["Portfolio"].min():,.2f}
@@ -417,8 +503,11 @@ def preview_data(event=None):
                 if df is None or df.empty:
                     raise ValueError(f"No data found for ticker: {ticker}")
 
+                def format_preview_axis(plot, element):
+                    plot.state.yaxis.formatter = NumeralTickFormatter(format="$0,0")
+
                 preview_obj = df.hvplot.line(
-                    y="Close", title=f"{ticker} Price History", height=350, responsive=True)
+                    y="Close", title=f"{ticker} Price History", height=350, responsive=True).opts(hooks=[format_preview_axis])
                 
                 stats_text = f"""### Price Statistics ({ticker})
 - **Min Price:** ${df["Close"].min():,.2f}
@@ -441,6 +530,23 @@ def preview_data(event=None):
             _safe_next_tick(lambda: _set_loading(False, ""))
     threading.Thread(target=worker, daemon=True).start()
 preview_button.on_click(preview_data)
+
+
+
+
+def style_metrics_table(df):
+    """Apply heatmap coloring to metrics table"""
+    metric_directions = {
+        'Final Value': True, #higher is better
+        'ROI': True,
+        'IRR': True,
+        'CAGR': True,
+        'Calmar Ratio': True,
+        'Max Drawdown': False #lower is better
+    }
+
+
+
 
 
 def run_simulation(event=None):
@@ -507,13 +613,16 @@ def run_simulation(event=None):
 
                 price_cols = [c for c in merged.columns if c not in ["Date", "Portfolio"]] #price columns for each ticker
 
+                def format_preview_axis(plot, element):
+                    plot.state.yaxis.formatter = NumeralTickFormatter(format="$0,0")
+
                 preview_obj = merged.hvplot.line(x="Date", 
                                                  y=price_cols,
                                                  ylabel="Stock Price ($)", 
                                                  title="Selected Tickers Price History", 
                                                  height=500, responsive=True,
                                                  legend="left",
-                                                 line_width=1).opts(legend_spacing=1)
+                                                 line_width=1).opts(legend_spacing=1, hooks=[format_preview_axis])
 
                 df = merged.set_index("Date")[["Portfolio"]].rename(columns={"Portfolio": "Close"}) #strategies use the portfolio average, not individual tickers
 
@@ -525,9 +634,11 @@ def run_simulation(event=None):
                 if df is None or df.empty:
                     raise ValueError(f"No data found for ticker: {ticker}")
 
-                preview_obj = df.hvplot.line(
-                    y="Close", title=f"{ticker} Price History", height=350, responsive=True)
+                def format_preview_axis(plot, element):
+                    plot.state.yaxis.formatter = NumeralTickFormatter(format="$0,0")
 
+                preview_obj = df.hvplot.line(
+                    y="Close", title=f"{ticker} Price History", height=350, responsive=True).opts(hooks=[format_preview_axis])
 
             _safe_next_tick(lambda: _set_status("Running strategies…"))
 
@@ -573,6 +684,8 @@ def run_simulation(event=None):
             for c in plots[1:]:
                 combined_plot *= c #overlay plots
 
+
+
             # ---- Metrics ----
             metrics_rows = []
             for name, df_result in results.items():
@@ -581,15 +694,21 @@ def run_simulation(event=None):
                 metrics_rows.append(m)
             metrics_df = pd.DataFrame(metrics_rows).set_index("Strategy")
 
+
+           
+  
+
             def apply_success():
                 """
                 Update the UI with results from the simulation.
                 """
                 preview_pane.object = preview_obj
                 plot_pane.object = combined_plot
-                metrics_pane.object = metrics_df
+                metrics_pane.value = metrics_df
+                               
 
-            _safe_next_tick(apply_success) #update UI on main thread, no lamda needed because apply_success has no arguments
+            _safe_next_tick(apply_success) #update UI on main thread
+
 
         except Exception as e:
             print(f"Error during simulation: {e}")
