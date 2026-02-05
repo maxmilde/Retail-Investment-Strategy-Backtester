@@ -128,5 +128,3 @@ In terms of limitations, there's a limit in yfinance rate meaning running the si
 
 ## Authors
 Maxim Milde & Zahid Pashayev
-
-Developed as a university project on Data Processing with Python
